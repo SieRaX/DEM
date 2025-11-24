@@ -1,0 +1,9 @@
+_target_: dem.energies.vgs_energy.vgs_energy
+
+name: "funnel"
+dimensionality: 10
+
+device: ${trainer.accelerator}
+
+data_normalization_factor: 1.0
+
