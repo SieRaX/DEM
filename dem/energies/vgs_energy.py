@@ -100,7 +100,7 @@ class vgs_energy(BaseEnergyFunction):
     def __call__(self, samples: torch.Tensor) -> torch.Tensor:
         if self.should_unnormalize:
             samples = self.unnormalize(samples)
-        return self.energy.log_prob(samples).squeeze(-1)
+        return self.energy.unnorm_log_prob(samples).squeeze(-1)
 
     def log_on_epoch_end(
         self,
