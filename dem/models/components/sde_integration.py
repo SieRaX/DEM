@@ -85,6 +85,7 @@ def integrate_sde(
     negative_time=False,
     num_negative_time_steps=100,
     clipper=None,
+    return_full_trajectory=False,
 ):
     start_time = time_range if reverse_time else 0.0
     end_time = time_range - start_time
@@ -93,12 +94,27 @@ def integrate_sde(
 
     x = x0
     samples = []
-
+    log_pi_r = []
+    log_q_r = []
+    log_pi_f = []
+    log_q_f = []
     with conditional_no_grad(no_grad):
         for t in times:
-            x, f = euler_maruyama_step(
-                sde, t, x, time_range / num_integration_steps, diffusion_scale
-            )
+            # Euler-Maruyama update
+            dt = time_range / num_integration_steps
+            mu = sde.f(t, x) * dt
+            sigma = diffusion_scale * sde.g(t, x) * np.sqrt(dt)
+            diffusion = sigma * torch.randn_like(x)
+            x_next = x + mu + diffusion
+            sigma_next = diffusion_scale * sde.g(t - dt, x) * np.sqrt(dt)
+
+            # Log probabilities
+            if return_full_trajectory:
+                log_pi_r.append(-0.5 * (((x_next - x - mu) / sigma) ** 2 + torch.log(sigma)).sum(dim=-1))
+                log_q_r.append(-0.5 * (((x - x_next) / sigma_next) ** 2 + torch.log(sigma_next)).sum(dim=-1))
+
+            x = x_next
+
             if energy_function.is_molecule:
                 x = remove_mean(x, energy_function.n_particles, energy_function.n_spatial_dim)
             samples.append(x)
@@ -111,4 +127,24 @@ def integrate_sde(
         )
         samples = torch.concatenate((samples, samples_langevin), axis=0)
 
-    return samples
+    if return_full_trajectory:
+        with conditional_no_grad(no_grad):
+            x = energy_function.energy.sample((samples.shape[1],))
+            for t in reversed(times):
+                # Euler-Maruyama update
+                dt = time_range / num_integration_steps
+                sigma = diffusion_scale * sde.g(t, x) * np.sqrt(dt)
+                diffusion = sigma * torch.randn_like(x)
+                x_prev = x + diffusion
+                sigma_prev = diffusion_scale * sde.g(t + dt, x) * np.sqrt(dt)
+                mu_prev = sde.f(t + dt, x) * dt
+
+                # Log probabilities
+                log_pi_f.append(-0.5 * (((x - x_prev - mu_prev) / sigma_prev) ** 2 + torch.log(sigma_prev)).sum(dim=-1))
+                log_q_f.append(-0.5 * (((x_prev - x) / sigma) ** 2 + torch.log(sigma)).sum(dim=-1))
+
+                x = x_prev
+
+        return samples, log_pi_r, log_q_r, log_pi_f, log_q_f
+    else:
+        return samples

@@ -18,7 +18,7 @@ class DummyDataModule(LightningDataModule):
         self.batch_size = batch_size
 
     def get_dataloader(self, size):
-        return DataLoader(np.arange(size * self.batch_size)[:, None], batch_size=self.batch_size)
+        return DataLoader(np.arange(size * self.batch_size)[:, None], batch_size=self.batch_size, num_workers=31)
 
     def train_dataloader(self):
         return self.get_dataloader(self.n_train_batches_per_epoch)

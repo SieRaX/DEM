@@ -519,22 +519,41 @@ class DEMLitModule(LightningModule):
         no_grad=True,
         negative_time=False,
     ) -> torch.Tensor:
-        trajectory = integrate_sde(
-            reverse_sde or self.reverse_sde,
-            samples,
-            self.num_integration_steps,
-            self.energy_function,
-            diffusion_scale=diffusion_scale,
-            reverse_time=reverse_time,
-            no_grad=no_grad,
-            negative_time=negative_time,
-            num_negative_time_steps=self.num_negative_time_steps,
-            clipper=self.clipper,
-        )
+        
         if return_full_trajectory:
-            return trajectory
-
-        return trajectory[-1]
+            log_prior = self.prior.log_prob(samples)
+            trajectory, log_pi_r, log_q_r, log_pi_f, log_q_f = integrate_sde(
+                reverse_sde or self.reverse_sde,
+                samples,
+                self.num_integration_steps,
+                self.energy_function,
+                diffusion_scale=diffusion_scale,
+                reverse_time=reverse_time,
+                no_grad=no_grad,
+                negative_time=negative_time,
+                num_negative_time_steps=self.num_negative_time_steps,
+                clipper=self.clipper,
+                return_full_trajectory = True,
+            )
+            log_pi_r = [log_prior] + log_pi_r
+            log_q_r = log_q_r + [- self.energy_function(trajectory[-1])]
+            log_pi_f = [log_prior] + log_pi_f
+            log_q_f = log_q_f + [- self.energy_function(trajectory[-1])]
+            return trajectory, log_pi_r, log_q_r, log_pi_f, log_q_f
+        else:
+            trajectory = integrate_sde(
+                reverse_sde or self.reverse_sde,
+                samples,
+                self.num_integration_steps,
+                self.energy_function,
+                diffusion_scale=diffusion_scale,
+                reverse_time=reverse_time,
+                no_grad=no_grad,
+                negative_time=negative_time,
+                num_negative_time_steps=self.num_negative_time_steps,
+                clipper=self.clipper,
+            )
+            return trajectory[-1]
 
     def compute_nll(
         self,
@@ -821,38 +840,6 @@ class DEMLitModule(LightningModule):
             "gen_0": backwards_samples,
         }
 
-        if self.nll_with_dem:
-            batch = self.energy_function.normalize(batch)
-            forwards_samples = self.compute_and_log_nll(
-                self.dem_cnf, self.prior, batch, prefix, "dem_"
-            )
-            self.compute_log_z(self.cfm_cnf, self.prior, backwards_samples, prefix, "dem_")
-        if self.nll_with_cfm:
-            forwards_samples = self.compute_and_log_nll(
-                self.cfm_cnf, self.cfm_prior, batch, prefix, ""
-            )
-
-            iter_samples, _, _ = self.buffer.sample(self.eval_batch_size)
-
-            # compute nll on buffer if not training cfm only
-            if not self.hparams.debug_use_train_data and self.nll_on_buffer:
-                forwards_samples = self.compute_and_log_nll(
-                    self.cfm_cnf, self.cfm_prior, iter_samples, prefix, "buffer_"
-                )
-
-            if self.compute_nll_on_train_data:
-                train_samples = self.energy_function.sample_train_set(self.eval_batch_size)
-                forwards_samples = self.compute_and_log_nll(
-                    self.cfm_cnf, self.cfm_prior, train_samples, prefix, "train_"
-                )
-
-        if self.logz_with_cfm:
-            backwards_samples = self.cfm_cnf.generate(
-                self.cfm_prior.sample(self.eval_batch_size),
-            )[-1]
-            # backwards_samples = self.generate_cfm_samples(self.eval_batch_size)
-            self.compute_log_z(self.cfm_cnf, self.cfm_prior, backwards_samples, prefix, "")
-
         self.eval_step_outputs.append(to_log)
 
     def validation_step(self, batch: torch.Tensor, batch_idx: int) -> None:
@@ -873,50 +860,40 @@ class DEMLitModule(LightningModule):
         }
 
         unprioritized_buffer_samples, cfm_samples, dem_samples = None, None, None
-        if self.nll_with_cfm:
-            batch_size = (
-                len(outputs["data_0"])
-                if "data_0" in outputs
-                else self.num_samples_to_generate_per_epoch
-            )
+        batch_size = (
+            len(outputs["data_0"])
+            if "data_0" in outputs
+            else self.num_samples_to_generate_per_epoch
+        )
+        dem_samples, log_pi_r, log_q_r, log_pi_f, log_q_f = self.generate_samples(
+            num_samples=batch_size,
+            diffusion_scale=self.diffusion_scale,
+            negative_time=self.negative_time,
+            return_full_trajectory=True,
+        )
+        dem_samples = dem_samples[-1]
+        log_pi_r = torch.stack(log_pi_r, dim=1)
+        log_q_r = torch.stack(log_q_r, dim=1)
+        print(f"log pi r shape: {log_pi_r.shape}")
+        print(f"log q r shape: {log_q_r.shape}")
+        log_ratio_r = log_q_r.sum(dim = 1, keepdim=True) - log_pi_r.sum(dim = 1, keepdim=True)
+        log_z_r = log_ratio_r.logsumexp(0) - math.log(log_ratio_r.shape[0])
+        print(f"DEM log Z_r estimate: {log_z_r.item()}")
+        log_pi_f = torch.stack(log_pi_f, dim=1)
+        log_q_f = torch.stack(log_q_f, dim=1)
+        print(f"log pi f shape: {log_pi_f.shape}")
+        print(f"log q f shape: {log_q_f.shape}")
+        log_ratio_f = log_pi_f.sum(dim = 1, keepdim=True) - log_q_f.sum(dim = 1, keepdim=True)
+        log_z_f = - (log_ratio_f.logsumexp(0) - math.log(log_ratio_f.shape[0]))
+        print(f"DEM log Z_f estimate: {log_z_f.item()}")
 
-            unprioritized_buffer_samples, _, _ = self.buffer.sample(
-                batch_size,
-                prioritize=self.prioritize_cfm_training_samples,
-            )
 
-            cfm_samples = self.cfm_cnf.generate(
-                self.cfm_prior.sample(batch_size),
-            )[-1]
-
-            self.energy_function.log_on_epoch_end(
-                self.last_samples,
-                self.last_energies,
-                wandb_logger,
-                unprioritized_buffer_samples=unprioritized_buffer_samples,
-                cfm_samples=cfm_samples,
-                replay_buffer=self.buffer,
-            )
-
-        else:
-            batch_size = (
-                len(outputs["data_0"])
-                if "data_0" in outputs
-                else self.num_samples_to_generate_per_epoch
-            )
-
-            dem_samples = self.generate_samples(
-                num_samples=batch_size,
-                diffusion_scale=self.diffusion_scale,
-                negative_time=self.negative_time,
-            )
-
-            # Only plot dem samples
-            self.energy_function.log_on_epoch_end(
-                dem_samples,
-                self.energy_function(dem_samples),
-                wandb_logger,
-            )
+        # Only plot dem samples
+        self.energy_function.log_on_epoch_end(
+            dem_samples,
+            self.energy_function(dem_samples),
+            wandb_logger,
+        )
 
         if "data_0" in outputs:
             # pad with time dimension 1

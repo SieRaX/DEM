@@ -34,21 +34,21 @@ class vgs_energy(BaseEnergyFunction):
         use_gpu = device != "cpu"
         torch.manual_seed(0)  # seed of 0 for GMM problem
         if name == "25_gmm":
-            self.gmm = GMM(
+            self.energy = GMM(
                 name=name,
             )
         elif name == "funnel":
-            self.gmm = Funnel(
+            self.energy = Funnel(
                 dim=dimensionality,
             )
         elif name == "manywell":
-            self.gmm = ManyWell(
+            self.energy = ManyWell(
                 dim=dimensionality,
             )
         else:
             raise ValueError("Unknown energy function name.")
         if use_gpu:
-            self.gmm.to(device)
+            self.energy.to(device)
 
         self.curr_epoch = 0
         self.device = device
@@ -73,12 +73,12 @@ class vgs_energy(BaseEnergyFunction):
         )
 
     def setup_test_set(self):
-        test_sample = self.gmm.sample((self.test_set_size,))
+        test_sample = self.energy.sample((self.test_set_size,))
         return test_sample
 
     def setup_train_set(self):
         if self.data_path_train is None:
-            train_samples = self.normalize(self.gmm.sample((self.train_set_size,)))
+            train_samples = self.normalize(self.energy.sample((self.train_set_size,)))
 
         else:
             # Assume the samples we are loading from disk are already normalized.
@@ -94,13 +94,13 @@ class vgs_energy(BaseEnergyFunction):
         return train_samples
 
     def setup_val_set(self):
-        val_samples = self.gmm.sample((self.val_set_size,))
+        val_samples = self.energy.sample((self.val_set_size,))
         return val_samples
 
     def __call__(self, samples: torch.Tensor) -> torch.Tensor:
         if self.should_unnormalize:
             samples = self.unnormalize(samples)
-        return self.gmm.log_prob(samples).squeeze(-1)
+        return self.energy.log_prob(samples).squeeze(-1)
 
     def log_on_epoch_end(
         self,
