@@ -11,18 +11,19 @@ defaults:
 
 tags: ["vgs_GMM", "iDEM"]
 
-seed: 12345
+seed: 0
 
 logger:
   wandb:
     tags: ${tags}
     group: "vgs_gmm"
+    name: "vgs_gmm_${seed}"
 
 model:
   noise_schedule:
     _target_: dem.models.components.noise_schedules.GeometricNoiseSchedule
-    sigma_min: 0.00001
-    sigma_max: 1.0
+    sigma_min: 0.00002
+    sigma_max: 2.0
 
   buffer:
     prioritize: false

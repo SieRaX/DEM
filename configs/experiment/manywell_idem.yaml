@@ -11,12 +11,13 @@ defaults:
 
 tags: ["manywell", "iDEM"]
 
-seed: 12345
+seed: 0
 
 logger:
   wandb:
     tags: ${tags}
     group: "manywell"
+    name: "manywell_${seed}"
 
 model:
   noise_schedule:

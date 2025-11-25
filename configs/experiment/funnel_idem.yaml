@@ -11,12 +11,13 @@ defaults:
 
 tags: ["funnel", "iDEM"]
 
-seed: 12345
+seed: 0
 
 logger:
   wandb:
     tags: ${tags}
     group: "funnel"
+    name: "funnel_${seed}"
 
 model:
   noise_schedule:

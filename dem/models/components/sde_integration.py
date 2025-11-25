@@ -130,6 +130,7 @@ def integrate_sde(
     if return_full_trajectory:
         with conditional_no_grad(no_grad):
             x = energy_function.energy.sample((samples.shape[1],))
+            log_q_f.append(-energy_function(x))
             for t in reversed(times):
                 # Euler-Maruyama update
                 dt = time_range / num_integration_steps
@@ -145,6 +146,6 @@ def integrate_sde(
 
                 x = x_prev
 
-        return samples, log_pi_r, log_q_r, log_pi_f, log_q_f
+        return samples, x, log_pi_r, log_q_r, log_pi_f, log_q_f
     else:
         return samples
