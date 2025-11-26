@@ -522,7 +522,7 @@ class DEMLitModule(LightningModule):
         
         if return_full_trajectory:
             log_prior = self.prior.log_prob(samples)
-            trajectory, x, log_pi_r, log_q_r, log_pi_f, log_q_f = integrate_sde(
+            trajectory, y, log_pi_r, log_q_r, log_pi_f, log_q_f = integrate_sde(
                 reverse_sde or self.reverse_sde,
                 samples,
                 self.num_integration_steps,
@@ -537,7 +537,7 @@ class DEMLitModule(LightningModule):
             )
             log_pi_r = [log_prior] + log_pi_r
             log_q_r = log_q_r + [- self.energy_function(trajectory[-1])]
-            log_pi_f = log_pi_f + [self.prior.log_prob(x)]
+            log_pi_f = log_pi_f + [self.prior.log_prob(y)]
             return trajectory, log_pi_r, log_q_r, log_pi_f, log_q_f
         else:
             trajectory = integrate_sde(

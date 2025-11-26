@@ -106,7 +106,7 @@ def integrate_sde(
             sigma = diffusion_scale * sde.g(t, x) * np.sqrt(dt)
             diffusion = sigma * torch.randn_like(x)
             x_next = x + mu + diffusion
-            sigma_next = diffusion_scale * sde.g(t - dt, x) * np.sqrt(dt)
+            sigma_next = diffusion_scale * sde.g(t - dt, x_next) * np.sqrt(dt)
 
             # Log probabilities
             if return_full_trajectory:
@@ -129,23 +129,23 @@ def integrate_sde(
 
     if return_full_trajectory:
         with conditional_no_grad(no_grad):
-            x = energy_function.energy.sample((samples.shape[1],))
-            log_q_f.append(-energy_function(x))
+            y = energy_function.energy.sample((samples.shape[1],))
+            log_q_f.append(-energy_function(y))
             for t in reversed(times):
                 # Euler-Maruyama update
                 dt = time_range / num_integration_steps
-                sigma = diffusion_scale * sde.g(t, x) * np.sqrt(dt)
-                diffusion = sigma * torch.randn_like(x)
-                x_prev = x + diffusion
-                sigma_prev = diffusion_scale * sde.g(t + dt, x) * np.sqrt(dt)
-                mu_prev = sde.f(t + dt, x) * dt
+                sigma = diffusion_scale * sde.g(t, y) * np.sqrt(dt)
+                diffusion = sigma * torch.randn_like(y)
+                y_prev = y + diffusion
+                sigma_prev = diffusion_scale * sde.g(t + dt, y_prev) * np.sqrt(dt)
+                mu_prev = sde.f(t + dt, y_prev) * dt
 
                 # Log probabilities
-                log_pi_f.append(-0.5 * (((x - x_prev - mu_prev) / sigma_prev) ** 2 + torch.log(sigma_prev)).sum(dim=-1))
-                log_q_f.append(-0.5 * (((x_prev - x) / sigma) ** 2 + torch.log(sigma)).sum(dim=-1))
+                log_pi_f.append(-0.5 * (((y - y_prev - mu_prev) / sigma_prev) ** 2 + torch.log(sigma_prev)).sum(dim=-1))
+                log_q_f.append(-0.5 * (((y_prev - y) / sigma) ** 2 + torch.log(sigma)).sum(dim=-1))
 
-                x = x_prev
+                y = y_prev
 
-        return samples, x, log_pi_r, log_q_r, log_pi_f, log_q_f
+        return samples, y, log_pi_r, log_q_r, log_pi_f, log_q_f
     else:
         return samples
